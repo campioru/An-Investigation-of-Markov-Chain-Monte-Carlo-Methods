@@ -85,7 +85,7 @@ def Ising(alg, width, length, g, T, n, equib):
     random state (equib = False) or an equilibrium state for temperatures less
     than the critical temperature (equib = True).
 
-    Returns the final energy, final magnetisation, and the initial and final
+    Returns the energy and magnetisation evolution, and the inital and final
     states.
     """
     spins = np.ones((n, width, length))
