@@ -14,99 +14,54 @@ representing c_V / k_B.
 
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy import stats
+import itertools as it
 
 
 def corr(spins):
     """Calculate the spin-spin correlation of a given state of the system."""
-    eye = np.shape(spins)[0]
-    jay = np.shape(spins)[1]
-    total = 0.
-    for A in range(eye):
-        for B in range(jay):
-            total += spins[A, B] * (spins[(A+1) % eye, B]
-                                    + spins[A, (B+1) % jay])
-    return total
-
-
-def mag(spins):
-    """Calculate the total magnetisation of a given state of the system."""
-    total = 0.
-    for A in spins:
-        for B in A:
-            total += B
-    return total
-
-
-def mean(array):
-    """Calculate the mean of an array."""
-    total = 0.
-    for i in array:
-        total += i
-    return total / len(array)
-
-
-def variance(array):
-    """Calculate the variance of an array."""
-    mean_ = mean(array)
-    total = 0.
-    for i in range(len(array)):
-        total += (array[i] - mean_) ** 2.
-    return total / (len(array) - 1.)
+    return np.sum(spins*(np.roll(spins, 1, axis=0) + np.roll(spins, 1, axis=1)))
 
 
 def mean_error(array):
     """Calculate the mean and the corresponding error of an array."""
-    mean_ = mean(array)
-    total = 0.
-    for i in range(len(array)):
-        total += (array[i] - mean_) ** 2.
-    return mean_, (total / ((len(array) - 1.) * (len(array)))) ** .5
+    return np.mean(array), stats.sem(array)
 
 
 def m_e_v_e(array):
     """Calculate the mean and variance and corresponding errors of an array."""
-    mean_ = mean(array)
-    total = 0.
-    for i in range(len(array)):
-        total += (array[i] - mean_) ** 2.
-    variance = total / (len(array) - 1.)
-    return (mean_, (variance / len(array)) ** .5, variance,
-            variance * (2. / (len(array) - 1.)) ** .5)
+    mean, var = np.mean(array), np.var(array, ddof=1)
+    return (mean, (var / len(array)) ** .5, var,
+            var * (2. / (len(array) - 1.)) ** .5)
 
 
-def Ising(alg, width, length, g, T, n, equib):
+def Ising(alg, width, length, g, T, n, start="para"):
     """Ising model.
 
     Run a Metropolis-Hastings (alg = 1) or heat bath (alg = 2) simulation of an
     Ising model of a given size with a given interaction term at a given
     temperature for a given number of samples.
 
-    Includes an extra parameter that determines if the algorithm starts in a
-    random state (equib = False) or an equilibrium state for temperatures less
-    than the critical temperature (equib = True).
+    Includes an extra parameter that determines whether the system begins in a
+    paramagnetic, ferromagnetic, or antiferromagnetic state
+    (state=["para", "ferro", "antiferro"]).
 
     Returns the energy and magnetisation evolution, and the inital and final
     states.
     """
-    spins = np.ones((n, width, length))
-    if equib is False:
+    spins = np.empty((n, width, length), dtype=int)
+    if start == "para":
+        spins[0] = 2*np.random.randint(0, 1+1, (width, length), dtype=int) - 1
+    elif start == "ferro":
+        spins[0] = np.ones((width, length), dtype=int)
+    elif start == "antiferro":
+        spins[0] = np.ones((width, length), dtype=int)
         for i in range(width):
-            for j in range(length):
-                if np.random.uniform(0, 1) < .5:
-                    spins[0, i, j] = -1.
-    elif equib is True:
-        if np.random.uniform(0, 1) < .5:
-            spins *= -1.
-        if g < 0.:
-            for i in range(width):
-                for j in range(length):
-                    if ((i % 2 == 0 and j % 2 == 0)
-                            or (i % 2 == 1 and j % 2 == 1)):
-                        spins[0, i, j] *= -1.
+            spins[0, i, i%2::2] = -1
 
     c = corr(spins[0])
-    M = np.empty(n)
-    m = mag(spins[0])
+    M = np.empty(n, dtype=int)
+    m = np.sum(spins[0])
     M[0] = m
     U = np.empty(n)
     E = -g * c
@@ -117,18 +72,17 @@ def Ising(alg, width, length, g, T, n, equib):
             spins[t] = spins[t-1]
             for i in range(width):
                 for j in range(length):
-                    c_diff = -2.*spins[t, i, j] * (
+                    c_diff = -2*spins[t, i, j] * (
                         spins[t, (i+1) % width, j]
                         + spins[t, i, (j+1) % length]
                         + spins[t, (i-1) % width, j]
                         + spins[t, i, (j-1) % length])
-                    m_diff = -2. * spins[t, i, j]
                     E_diff = -g * c_diff
                     if (E_diff <= 0.
                             or np.random.uniform(0, 1) <= np.exp(-E_diff / T)):
                         spins[t, i, j] *= -1.
                         c += c_diff
-                        m += m_diff
+                        m += 2 * spins[t, i, j]
                         E += E_diff
             M[t] = m
             U[t] = E
@@ -137,18 +91,17 @@ def Ising(alg, width, length, g, T, n, equib):
             spins[t] = spins[t-1]
             for i in range(width):
                 for j in range(length):
-                    c_diff = -2.*spins[t, i, j] * (
+                    c_diff = -2*spins[t, i, j] * (
                         spins[t, (i+1) % width, j]
                         + spins[t, i, (j+1) % length]
                         + spins[t, (i-1) % width, j]
                         + spins[t, i, (j-1) % length])
-                    m_diff = -2. * spins[t, i, j]
                     E_diff = -g * c_diff
                     p = np.exp(-E_diff/T)
                     if np.random.uniform(0, 1) <= p / (p+1.):
                         spins[t, i, j] *= -1.
                         c += c_diff
-                        m += m_diff
+                        m += 2 * spins[t, i, j]
                         E += E_diff
             M[t] = m
             U[t] = E
@@ -179,41 +132,38 @@ disc = 2000
 init_spins, final_spins = (
     np.empty((len(gs), len(algs), len(Ts), width, length)) for _ in range(2))
 
-for g in range(len(gs)):
-    for a in range(len(algs)):
-        for T in range(len(Ts)):
-            temp_Us, temp_Ms, init_spins[g, a, T], final_spins[g, a, T] = (
-                Ising(algs[a], width, length, gs[g], Ts[T], n, False))
-            temp_Us = temp_Us[disc:]
-            temp_Ms = temp_Ms[disc:]
+for (g, g_), (a, alg_), (T, T_) in it.product(enumerate(gs), enumerate(algs),
+                                              enumerate(Ts)):
+    temp_Us, temp_Ms, init_spins[g, a, T], final_spins[g, a, T] = Ising(
+        alg_, width, length, g_, T_, n)
+    temp_Us = temp_Us[disc:]
+    temp_Ms = temp_Ms[disc:]
 
-            (Us[g, a, T], Us_nerror[g, a, T], Vs[g, a, T],
-             Vs_nerror[g, a, T]) = m_e_v_e(temp_Us)
-            U_mses[g, a, T, 0] = Us_nerror[g, a, T] ** 2.
-            U_mses_error[g, a, T, 0] = U_mses[g, a, T, 0] * (2./(n - 1.)) ** .5
-            V_mses[g, a, T, 0] = Vs_nerror[g, a, T] ** 2.
+    Us[g, a, T], Us_nerror[g, a, T], Vs[g, a, T], Vs_nerror[g, a, T] = m_e_v_e(
+        temp_Us)
+    U_mses[g, a, T, 0] = Us_nerror[g, a, T] ** 2.
+    U_mses_error[g, a, T, 0] = U_mses[g, a, T, 0] * (2./(n - 1.)) ** .5
+    V_mses[g, a, T, 0] = Vs_nerror[g, a, T] ** 2.
 
-            Ms[g, a, T], Ms_nerror[g, a, T] = mean_error(temp_Ms)
-            M_mses[g, a, T, 0] = Ms_nerror[g, a, T] ** 2.
-            M_mses_error[g, a, T, 0] = M_mses[g, a, T, 0] * (2./(n - 1.)) ** .5
+    Ms[g, a, T], Ms_nerror[g, a, T] = mean_error(temp_Ms)
+    M_mses[g, a, T, 0] = Ms_nerror[g, a, T] ** 2.
+    M_mses_error[g, a, T, 0] = M_mses[g, a, T, 0] * (2./(n - 1.)) ** .5
 
-            for k in range(1, K):
-                bins = int(len(temp_Us) / 2)
-                binned_Us, binned_Ms = (np.empty(bins) for _ in range(2))
-                for b in range(bins):
-                    binned_Us[b] = .5 * (temp_Us[2*b] + temp_Us[2*b + 1])
-                    binned_Ms[b] = .5 * (temp_Ms[2*b] + temp_Ms[2*b + 1])
-                temp_Us = binned_Us
-                temp_Ms = binned_Ms
+    for k in range(1, K):
+        bins = int(len(temp_Us) / 2)
+        binned_Us, binned_Ms = (np.empty(bins) for _ in range(2))
+        for b in range(bins):
+            binned_Us[b] = .5 * (temp_Us[2*b] + temp_Us[2*b + 1])
+            binned_Ms[b] = .5 * (temp_Ms[2*b] + temp_Ms[2*b + 1])
+        temp_Us = binned_Us
+        temp_Ms = binned_Ms
 
-                U_mses[g, a, T, k] = variance(temp_Us) / bins
-                U_mses_error[g, a, T, k] = (U_mses[g, a, T, k]
-                                            * (2. / (bins - 1.)) ** .5)
-                V_mses[g, a, T, k] = U_mses_error[g, a, T, k] ** 2.
+        U_mses[g, a, T, k] = np.var(temp_Us, ddof=1) / bins
+        U_mses_error[g, a, T, k] = U_mses[g, a, T, k] * (2. / (bins - 1.)) ** .5
+        V_mses[g, a, T, k] = U_mses_error[g, a, T, k] ** 2.
 
-                M_mses[g, a, T, k] = variance(temp_Ms) / bins
-                M_mses_error[g, a, T, k] = (M_mses[g, a, T, k]
-                                            * (2. / (bins - 1.)) ** .5)
+        M_mses[g, a, T, k] = np.var(temp_Ms, ddof=1) / bins
+        M_mses_error[g, a, T, k] = M_mses[g, a, T, k] * (2. / (bins - 1.)) ** .5
 
 
 alg_strings = ["M-H", "HB"]
@@ -236,64 +186,54 @@ for i in range(K):
 b = "both"
 f = False
 
-for g in range(len(gs)):
-    for a in range(len(algs)):
-        for T in range(len(Ts)):
-            plt.imshow(init_spins[g, a, T])
-            plt.tick_params(axis=b, which=b, bottom=f, top=f, labelbottom=f,
-                            left=f, right=f, labelleft=f)
-            plt.title(r"Initial state (%s, $g=%s$, $T=%s$)" % (
-                alg_strings[a], g_strings[g], T_strings[T]))
-            plt.savefig("Initial (%s, g = %s, T = %s).pdf" % (
-                alg_strings[a], g_strings[g], T_strings[T]))
-            plt.clf()
+for (g, g_str), (a, alg_str), (T, T_str) in it.product(
+    enumerate(g_strings), enumerate(alg_strings), enumerate(T_strings)):
+    plt.imshow(init_spins[g, a, T])
+    plt.tick_params(axis=b, which=b, bottom=f, top=f, labelbottom=f, left=f,
+                    right=f, labelleft=f)
+    plt.title(rf"Initial state ({alg_str}, $g={g_str}$, $T={T_str}$)")
+    plt.savefig(f"Initial ({alg_str}, g = {g_str}, T = {T_str}).pdf")
+    plt.clf()
 
-            plt.imshow(final_spins[g, a, T])
-            plt.tick_params(axis=b, which=b, bottom=f, top=f, labelbottom=f,
-                            left=f, right=f, labelleft=f)
-            plt.title(r"Final state (%s, $g=%s$, $T=%s$)" % (
-                alg_strings[a], g_strings[g], T_strings[T]))
-            plt.savefig("Final (%s, g = %s, T = %s).pdf" % (
-                alg_strings[a], g_strings[g], T_strings[T]))
-            plt.clf()
+    plt.imshow(final_spins[g, a, T])
+    plt.tick_params(axis=b, which=b, bottom=f, top=f, labelbottom=f, left=f,
+                    right=f, labelleft=f)
+    plt.title(rf"Final state ({alg_str}, $g={g_str}$, $T={T_str}$)")
+    plt.savefig(f"Final ({alg_str}, g = {g_str}, T = {T_str}).pdf")
+    plt.clf()
 
-            plt.errorbar(factors, U_mses[g, a, T], yerr=U_mses_error[g, a, T],
-                         color=(Tcolours[T, 0], Tcolours[T, 1],
-                                Tcolours[T, 2]))
-            plt.xscale("log", base=2)
-            plt.xlim(1., factors[-1])
-            plt.xlabel(r"$b$")
-            plt.ylabel(r"Var($\bar{U}$)")
-            plt.title(r"Binned MSE($\bar{U}$) (%s, $g=%s$, $T=%s$)" % (
-                alg_strings[a], g_strings[g], T_strings[T]))
-            plt.savefig("Binned U (%s, g = %s, T = %s).pdf" % (
-                alg_strings[a], g_strings[g], T_strings[T]))
-            plt.clf()
+    plt.errorbar(factors, U_mses[g, a, T], yerr=U_mses_error[g, a, T],
+                 color=(Tcolours[T, 0], Tcolours[T, 1], Tcolours[T, 2]))
+    plt.xscale("log", base=2)
+    plt.xlim(1., factors[-1])
+    plt.xlabel(r"$b$")
+    barU = r"$\bar{U}$"
+    plt.ylabel(rf"Var({barU})")
+    plt.title(rf"Binned MSE({barU}) ({alg_str}, $g={g_str}$, $T={T_str}$)")
+    plt.savefig(f"Binned U ({alg_str}, g = {g_str}, T = {T_str}).pdf")
+    plt.clf()
 
-            plt.errorbar(factors, M_mses[g, a, T], yerr=M_mses_error[g, a, T],
-                         color=(Tcolours[T, 0], Tcolours[T, 1],
-                                Tcolours[T, 2]))
-            plt.xscale("log", base=2)
-            plt.xlim(1., factors[-1])
-            plt.xlabel(r"$b$")
-            plt.ylabel(r"Var($\bar{M}$)")
-            plt.title(r"Binned MSE($\bar{M}$) (%s, $g=%s$, $T=%s$)" % (
-                alg_strings[a], g_strings[g], T_strings[T]))
-            plt.savefig("Binned M (%s, g = %s, T = %s).pdf" % (
-                alg_strings[a], g_strings[g], T_strings[T]))
-            plt.clf()
+    plt.errorbar(factors, M_mses[g, a, T], yerr=M_mses_error[g, a, T],
+                 color=(Tcolours[T, 0], Tcolours[T, 1], Tcolours[T, 2]))
+    plt.xscale("log", base=2)
+    plt.xlim(1., factors[-1])
+    plt.xlabel(r"$b$")
+    barM = r"$\bar{M}$"
+    plt.ylabel(rf"Var({barM})")
+    plt.title(rf"Binned MSE({barM}) ({alg_str}, $g={g_str}$, $T={T_str}$)")
+    plt.savefig(f"Binned M ({alg_str}, g = {g_str}, T = {T_str}).pdf")
+    plt.clf()
 
-            plt.plot(factors, V_mses[g, a, T] / (Ts[T]*Ts[T]),
-                     color=(Tcolours[T, 0], Tcolours[T, 1], Tcolours[T, 2]))
-            plt.xscale("log", base=2)
-            plt.xlim(1., factors[-1])
-            plt.xlabel(r"$b$")
-            plt.ylabel(r"Var($\bar{c_V}$)")
-            plt.title(r"Binned MSE($\bar{c_V}$) (%s, $g=%s$, $T=%s$)" % (
-                alg_strings[a], g_strings[g], T_strings[T]))
-            plt.savefig("Binned c_V (%s, g = %s, T = %s).pdf" % (
-                alg_strings[a], g_strings[g], T_strings[T]))
-            plt.clf()
+    plt.plot(factors, V_mses[g, a, T] / (Ts[T] ** 2.),
+             color=(Tcolours[T, 0], Tcolours[T, 1], Tcolours[T, 2]))
+    plt.xscale("log", base=2)
+    plt.xlim(1., factors[-1])
+    plt.xlabel(r"$b$")
+    barcV = r"$\bar{c_V}$"
+    plt.ylabel(rf"Var({barcV})")
+    plt.title(rf"Binned MSE({barcV}) ({alg_str}, $g={g_str}$, $T={T_str}$)")
+    plt.savefig(f"Binned c_V ({alg_str}, g = {g_str}, T = {T_str}).pdf")
+    plt.clf()
 
 
 Us_indexes, Ms_indexes = (np.empty((len(gs), len(algs), len(Ts)), dtype=int)
@@ -325,85 +265,80 @@ Ms_indexes[1, 1] = np.array([0, 0, 4, 6, 3, 5, 4, 4, 5, 4, 4, 5, 5, 5, 5, 5, 6,
 
 Us_tau, Us_terror, Ms_tau, Ms_terror = (np.empty((len(gs), len(algs), len(Ts)))
                                         for _ in range(4))
-for g in range(len(gs)):
-    for a in range(len(algs)):
-        for T in range(len(Ts)):
-            i = U_mses[g, a, T, Us_indexes[g, a, T]]
-            j = M_mses[g, a, T, Ms_indexes[g, a, T]]
-            Us_terror[g, a, T] = i ** .5
-            Ms_terror[g, a, T] = j ** .5
-            Us_tau[g, a, T] = i / U_mses[g, a, T, 0]
-            Ms_tau[g, a, T] = j / M_mses[g, a, T, 0]
+for g, a, T in it.product(range(len(gs)), range(len(algs)), range(len(Ts))):
+    i = U_mses[g, a, T, Us_indexes[g, a, T]]
+    j = M_mses[g, a, T, Ms_indexes[g, a, T]]
+    Us_terror[g, a, T] = i ** .5
+    Ms_terror[g, a, T] = j ** .5
+    Us_tau[g, a, T] = i / U_mses[g, a, T, 0]
+    Ms_tau[g, a, T] = j / M_mses[g, a, T, 0]
 
 
 rgbm = np.array([["r", "g"], ["b", "m"]])
 lims = [2, 1]
-for g in range(len(gs)):
+for g, g_str in enumerate(g_strings):
     plt.axvline(x=T_crit, color="k", linestyle="dashed", label=r"$T_c$")
-    for a in range(len(algs)):
-        plt.plot(Ts, Us_tau[g, a], color=rgbm[g, a], label=r"%s, $g=%s$" %
-                 (alg_strings[a], g_strings[g]))
+    for a, alg_str in enumerate(alg_strings):
+        plt.plot(Ts, Us_tau[g, a], color=rgbm[g, a],
+                 label=rf"{alg_str}, $g={g_str}$")
     plt.xlim(Ts[lims[g]], Ts[-1])
     plt.xlabel(r"$T$")
     plt.ylabel(r"$\tau$")
-    plt.title("Energy correlation times ($g=%s$)" % g_strings[g])
+    plt.title(f"Energy correlation times ($g={g_str}$)")
     plt.legend()
-    plt.savefig("U times (g = %s).pdf" % g_strings[g])
+    plt.savefig(f"U times (g = {g_str}).pdf")
     plt.clf()
 
     plt.axvline(x=T_crit, color="k", linestyle="dashed", label=r"$T_c$")
-    for a in range(len(algs)):
-        plt.plot(Ts, Ms_tau[g, a], color=rgbm[g, a], label=r"%s, $g=%s$" %
-                 (alg_strings[a], g_strings[g]))
+    for a, alg_str in enumerate(alg_strings):
+        plt.plot(Ts, Ms_tau[g, a], color=rgbm[g, a],
+                 label=rf"{alg_str}, $g={g_str}$")
     plt.xlim(Ts[lims[g]], Ts[-1])
     plt.xlabel(r"$T$")
     plt.ylabel(r"$\tau$")
-    plt.title("Magnetisation correlation times ($g=%s$)" % g_strings[g])
+    plt.title(f"Magnetisation correlation times ($g={g_str}$)")
     plt.legend()
-    plt.savefig("M times (g = %s).pdf" % g_strings[g])
+    plt.savefig(f"M times (g = {g_str}).pdf")
     plt.clf()
 
 
-for g in range(len(gs)):
-    for a in range(len(algs)):
-        plt.axvline(x=T_crit, color="k", linestyle="dashed", label=r"$T_c$")
-        plt.errorbar(Ts, Us[g, a], yerr=Us_terror[g, a], color=rgbm[g, a])
-        plt.xlim(min(Ts), max(Ts))
-        plt.xlabel(r"$T$")
-        plt.ylabel(r"$U$")
-        plt.title(r"Average energy (%s, $g=%s$)" % (alg_strings[a],
-                                                    g_strings[g]))
-        plt.legend()
-        plt.savefig("U (%s, g = %s).pdf" % (alg_strings[a], g_strings[g]))
-        plt.clf()
+for (g, g_str), (a, alg_str) in it.product(enumerate(g_strings),
+                                           enumerate(alg_strings)):
+    plt.axvline(x=T_crit, color="k", linestyle="dashed", label=r"$T_c$")
+    plt.errorbar(Ts, Us[g, a], yerr=Us_terror[g, a], color=rgbm[g, a])
+    plt.xlim(min(Ts), max(Ts))
+    plt.xlabel(r"$T$")
+    plt.ylabel(r"$U$")
+    plt.title(rf"Average energy ({alg_str}, $g={g_str}$)")
+    plt.legend()
+    plt.savefig(f"U ({alg_str}, g = {g_str}).pdf")
+    plt.clf()
 
-        plt.axvline(x=T_crit, color="k", linestyle="dashed", label=r"$T_c$")
-        plt.errorbar(Ts, abs(Ms[g, a]), yerr=Ms_terror[g, a], color=rgbm[g, a])
-        plt.xlim(min(Ts), max(Ts))
-        plt.xlabel(r"$T$")
-        plt.ylabel(r"$|M|$")
-        plt.title(r"Average magnetisation (%s, $g=%s$)" % (alg_strings[a],
-                                                           g_strings[g]))
-        plt.legend()
-        plt.savefig("M (%s, g = %s).pdf" % (alg_strings[a], g_strings[g]))
-        plt.clf()
+    plt.axvline(x=T_crit, color="k", linestyle="dashed", label=r"$T_c$")
+    plt.errorbar(Ts, abs(Ms[g, a]), yerr=Ms_terror[g, a], color=rgbm[g, a])
+    plt.xlim(min(Ts), max(Ts))
+    plt.xlabel(r"$T$")
+    plt.ylabel(r"$|M|$")
+    plt.title(rf"Average magnetisation ({alg_str}, $g={g_str}$)")
+    plt.legend()
+    plt.savefig(f"M ({alg_str}, g = {g_str}).pdf")
+    plt.clf()
 
-        plt.axvline(x=T_crit, color="k", linestyle="dashed", label=r"$T_c$")
-        plt.plot(Ts, Vs[g, a] / (Ts*Ts), color=rgbm[g, a])
-        plt.xlim(min(Ts), max(Ts))
-        plt.xlabel(r"$T$")
-        plt.ylabel(r"$c_V$")
-        plt.title(r"Average heat capacity (%s, $g=%s$)" % (alg_strings[a],
-                                                           g_strings[g]))
-        plt.legend()
-        plt.savefig("c_V (%s, g = %s).pdf" % (alg_strings[a], g_strings[g]))
-        plt.clf()
+    plt.axvline(x=T_crit, color="k", linestyle="dashed", label=r"$T_c$")
+    plt.plot(Ts, Vs[g, a] / (Ts*Ts), color=rgbm[g, a])
+    plt.xlim(min(Ts), max(Ts))
+    plt.xlabel(r"$T$")
+    plt.ylabel(r"$c_V$")
+    plt.title(rf"Average heat capacity ({alg_str}, $g={g_str}$)")
+    plt.legend()
+    plt.savefig(f"c_V ({alg_str}, g = {g_str}).pdf")
+    plt.clf()
 
 plt.axvline(x=T_crit, color="k", linestyle="dashed", label=r"$T_c$")
-for g in range(len(gs)):
-    for a in range(len(algs)):
-        plt.errorbar(Ts, Us[g, a], yerr=Us_terror[g, a], color=rgbm[g, a],
-                     label=r"%s, $g=%s$" % (alg_strings[a], g_strings[g]))
+for (g, g_str), (a, alg_str) in it.product(enumerate(g_strings),
+                                           enumerate(alg_strings)):
+    plt.errorbar(Ts, Us[g, a], yerr=Us_terror[g, a], color=rgbm[g, a],
+                 label=rf"{alg_str}, $g={g_str}$")
 plt.xlim(min(Ts), max(Ts))
 plt.xlabel(r"$T$")
 plt.ylabel(r"$U$")
@@ -412,22 +347,23 @@ plt.legend()
 plt.savefig("U.pdf")
 plt.clf()
 
-for g in range(len(gs)):
+for g, g_str in enumerate(g_strings):
     plt.axvline(x=T_crit, color="k", linestyle="dashed", label=r"$T_c$")
-    for a in range(len(algs)):
+    for a, alg_str in enumerate(alg_strings):
         plt.errorbar(Ts, abs(Ms[g, a]), yerr=Ms_terror[g, a], color=rgbm[g, a],
-                     label=r"%s, $g=%s$" % (alg_strings[a], g_strings[g]))
+                     label=rf"{alg_str}, $g={g_str}$")
     plt.xlabel(r"$T$")
     plt.ylabel(r"$|M|$")
-    plt.title(r"Average magnetisation ($g=%s$)" % g_strings[g])
+    plt.title(rf"Average magnetisation ($g={g_str}$)")
     plt.legend()
-    plt.savefig("M (g = %s).pdf" % g_strings[g])
+    plt.savefig(f"M (g = {g_str}).pdf")
     plt.clf()
 
 plt.axvline(x=T_crit, color="k", linestyle="dashed", label=r"$T_c$")
-for g in range(len(gs)):
-    for a in range(len(algs)):
-        plt.plot(Ts, Vs[g, a] / (Ts*Ts), color=rgbm[g, a], label=r"M-H, $g=1$")
+for g, g_str in enumerate(g_strings):
+    for a, alg_str in enumerate(alg_strings):
+        plt.plot(Ts, Vs[g, a] / (Ts*Ts), color=rgbm[g, a],
+                 label=rf"{alg_str}, $g={g_str}$")
 plt.xlim(min(Ts), max(Ts))
 plt.xlabel(r"$T$")
 plt.ylabel(r"$c_V$")
