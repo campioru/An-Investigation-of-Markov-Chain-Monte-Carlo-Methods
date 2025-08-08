@@ -2,53 +2,56 @@
 
 Employs the antithetic variable and control variate approaches to reduce the
 variance of the estimate of the integral of (1+X)^(-1) from 0 to 1, with X = X1
-and X = X1...X10.
+and X = X1...X10, compared to doubling the number of samples.
 
 @author: Ruaidhrí Campion
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
+from sys import argv
 
 
-K = 20
-n = 2 ** K
-qs = [1, 10]
-analytic_means = [np.log(2.), 73*np.pi**10. / 6842880.]
-for (q, analytic_mean) in zip(qs, analytic_means):
-    xs = np.random.uniform(0, 1, (n, q))
-    xs_ = xs.copy()
-    xs_[1::2] = 1. - xs[::2]
-    Xs = np.prod(xs, axis=-1)
-    Xs_ = np.prod(xs_, axis=-1)
-    d_s = 1. / (1. + Xs)
-    a_s = 1. / (1. + Xs_)
+iterations = int(argv[1])
+iteration_range = 1 + np.arange(iterations)
+double_point_range = 1 + np.arange(2 * iterations)
+anti_point_range = double_point_range[1::2]
 
-    mu = 1. + .5 ** q
-    var = 3.**-q - .5**(2*q)
-    # TODO change to sample covariance at to each point
-    # otherwise comparing method using all the data to methods involving a subset of the data
-    cov = np.mean((1. + Xs) * d_s) - mu * np.mean(d_s)
-    cstar = -cov / var
-    c_s = d_s + cstar * ((1. + Xs) - mu)
+dims = [1, 10]
+analytic_ints = [np.log(2.), 73.*np.pi**10. / 6842880.]
 
-    points = np.arange(2, n+1, 2)
-    average_ds = np.cumsum(d_s)[1::2] / points
-    average_as = np.cumsum(a_s)[1::2] / points
-    average_cs = np.cumsum(c_s)[1::2] / points
+for (dim, analytic_int) in zip(dims, analytic_ints):
+    base_vecs = np.random.uniform(0, 1, (iterations, dim))
+    base_prods = np.prod(base_vecs, axis=-1)
+    base_obs = 1. / (1. + base_prods)
+    base_means = np.cumsum(base_obs) / iteration_range
 
-    # TODO include errorbars (include autocorrelation)
-    plt.axhline(y=analytic_mean, color="k", linestyle="dashed")
-    plt.plot(points, average_ds, color="r", label="Direct")
-    plt.plot(points, average_as, color="g", label="Antithetic")
-    plt.plot(points, average_cs, color="b", label="Control")
+    double_obs = np.empty(2 * iterations, dtype=base_obs.dtype)
+    double_obs[::2] = base_obs.copy()
+    double_obs[1::2] = 1. / (1. + np.prod(np.random.uniform(0, 1, (iterations, dim)), axis=-1))
+    double_means = np.cumsum(double_obs) / double_point_range
+
+    anti_obs = 1. / (1. + np.prod(1 - base_vecs, axis=-1))
+    anti_means = np.cumsum(base_obs + anti_obs) / anti_point_range
+
+    variate_obs = 1 + base_prods
+    variate_mean = 1. + .5 ** dim
+    variate_means = np.cumsum(variate_obs) / iteration_range
+    variate_vars = np.array([np.inf if i == 1 else np.var(variate_obs[:i], ddof=1) for i in iteration_range])
+    control_covs = 1. - base_means * variate_means # == sample covariance of base and variate
+    control_means = base_means - control_covs / variate_vars * (variate_means - variate_mean)
+
+    plt.axhline(y=analytic_int, color="k", linestyle="dashed")
+    plt.plot(double_point_range / 2, double_means, color="r", label="Double")
+    plt.plot(iteration_range, anti_means, color="g", label="Antithetic")
+    plt.plot(iteration_range, control_means, color="b", label="Control")
     plt.xscale("log", base=2)
-    plt.xlim(2, n)
-    plt.xlabel(r"$n$")
+    plt.xlim(1, iterations)
+    plt.xlabel("iterations")
     plt.ylabel(r"$\bar{f}$")
-    plt.title(r"$\int_0^1 \frac{1}{1+X^(" + f"{q}" + r")}\,dx$")
+    plt.title(r"$\int_0^1 \frac{1}{1+X^{(" + f"{dim}" + r")}}\,dx$")
     plt.legend()
-    plt.savefig(f"(1+X^({q}))^(-1).pdf", bbox_inches='tight')
+    plt.savefig(f"(1+X^({dim}))^(-1).pdf", bbox_inches='tight')
     plt.clf()
 
 # TODO consider combining antithetic + control
